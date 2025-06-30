@@ -1,4 +1,4 @@
-# Repost fron Vk to Tg 🔄
+# Repost from Vk to Tg 🔄
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
 [![Aiogram](https://img.shields.io/badge/Aiogram-2.x-green.svg)](https://aiogram.dev)
