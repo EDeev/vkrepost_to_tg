@@ -1,3 +1,5 @@
+from html import escape
+
 import vk_api
 
 
@@ -70,7 +72,7 @@ def get_output(post, name, domain, repost=None):
     [post_id, post] = post
     owner_id, output = post['owner_id'], []
 
-    attachments = post['attachments']
+    attachments = post.get('attachments', [])
     types = [[typ['type'], typ] for typ in attachments]
 
     for typ in types:
@@ -78,12 +80,12 @@ def get_output(post, name, domain, repost=None):
             output.append([typ[0], typ[1]['photo']['sizes'][-1]['url']])
         elif typ[0] == 'video':
             video = typ[1]['video']
-            if 'photo_1280' in video:
-                frame = video['photo_1280']
-            else:
-                frame = video['photo_800']
+            # обложка: самая крупная из доступных
+            frame = video.get('photo_1280') or video.get('photo_800') or video.get('photo_320')
+            if frame is None and video.get('image'):
+                frame = video['image'][-1]['url']
 
-            output.append([typ[0], [video['title'], video['duration'], video['views'], frame]])
+            output.append([typ[0], [video['title'], video.get('duration', 0), video.get('views', 0), frame]])
         elif typ[0] == "doc":
             output.append([typ[0], [typ[1]['doc']['title'], typ[1]['doc']['url'],
                                     typ[1]['doc']['type'], typ[1]['doc']['size']]])
@@ -99,11 +101,11 @@ def get_output(post, name, domain, repost=None):
     if repost:
         [author_id, author_owner_id, author_name, author_domain, author_comment] = repost
 
-        comment = f"<b>Автор репоста -</b> <a href='https://vk.com/{author_domain}?w=wall{author_owner_id}_{author_id}'>{author_name}</a>"
-        if author_comment != "": comment += f"\n<blockquote>{author_comment}</blockquote>\n"
-        comment += f"\n<b>Автор поста -</b> <a href='https://vk.com/{domain}?w=wall{owner_id}_{post_id}'>{name}</a>"
+        comment = f"<b>Автор репоста -</b> <a href='https://vk.com/{author_domain}?w=wall{author_owner_id}_{author_id}'>{escape(author_name)}</a>"
+        if author_comment != "": comment += f"\n<blockquote>{escape(author_comment)}</blockquote>\n"
+        comment += f"\n<b>Автор поста -</b> <a href='https://vk.com/{domain}?w=wall{owner_id}_{post_id}'>{escape(name)}</a>"
 
         return [output, f"{post['text']}", comment, author_id]
     else:
         return [output, f"{post['text']}",
-                f"<b>Автор поста -</b> <a href='https://vk.com/{domain}?w=wall{owner_id}_{post_id}'>{name}</a>", post_id]
+                f"<b>Автор поста -</b> <a href='https://vk.com/{domain}?w=wall{owner_id}_{post_id}'>{escape(name)}</a>", post_id]

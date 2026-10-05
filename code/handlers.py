@@ -1,13 +1,16 @@
+import asyncio
+import logging
+
 from aiogram import types, F, Router
 from aiogram.types import Message, CallbackQuery, ContentType
 from aiogram.filters import Command
 
 from emoji import emojize
 
-from init import *
-from config import *
+from init import bot, du, db
+from config import checkUrl, loginUrl, serviceToken
 from vk_scripts import VkParser
-from scripts import login, pars_post
+from scripts import login, pars_post, send_post
 
 router = Router()
 
@@ -18,7 +21,7 @@ async def start(msg: Message) -> None:
 
     buttons = [[types.InlineKeyboardButton(text="КОМАНДЫ", callback_data="com"),
                types.InlineKeyboardButton(text="АВТОР", callback_data="auth")]]
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons, row_width=2)
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await msg.answer(text=f'<b>Portal in VK</b> - это бот для перепоста постов со страниц в социальной сети ВКонтакте. '
                           f'Для начала работы вам нужно всего лишь вызвать команду <b>/add</b> и добавить к ней '
@@ -39,7 +42,9 @@ async def function(call: CallbackQuery) -> None:
                                    '<b>/list</b> - список страниц от, которых вы получаете уведомления\n'
                                    '<b>/notif</b> - отписка или подписка от всех уведомлений\n'
                                    '<b>/last_post</b> - получение последнего поста по короткому имени страницы\n'
-                                   '<b>/add</b> и <b>/del</b> - добавление и удаление странички из списка подписок\n')
+                                   '<b>/add</b> и <b>/del</b> - добавление и удаление странички из списка подписок\n'
+                                   '<b>/update</b> - ответом на пост: прислать его заново с актуальными данными\n'
+                                   '<b>/logout</b> - удалить сохранённый токен VK\n')
 
 
 @router.callback_query(F.data == "auth")
@@ -51,7 +56,7 @@ async def author(call: CallbackQuery) -> None:
                                    'возможность ставить через Telegram лайки на посты в самой социальной сети!'
                                    
                                    '\n\nЯ же пишу подобные небольшие проекты, о которых вы можете узнать '
-                                   'больше на моём <a href="https://github.com/IGlek">GitHub</a>.')
+                                   'больше на моём <a href="https://github.com/EDeev">GitHub</a>.')
 
 
 # КОМАНДЫ
@@ -60,8 +65,10 @@ async def notification(msg: Message) -> None:
     user_id = login(msg.chat.id, du, db)
     status = db.get_status(user_id)
 
-    groups = list(map(int, db.get_user_groups(user_id).split(";")))
-    for group in groups: db.update_countGroup(group, -1 if status else 1)
+    # у пользователя может ещё не быть ни одной подписки
+    groups = db.get_user_groups(user_id)
+    for group in map(int, groups.split(";") if groups else []):
+        db.update_countGroup(group, -1 if status else 1)
 
     if status: await msg.answer("Получение постов из ВК выключено!")
     else: await msg.answer("Получение постов из ВК включено!")
@@ -81,7 +88,7 @@ async def add_del(msg: Message) -> None:
             if token: vk = VkParser(token)
             else: vk = VkParser(serviceToken)
 
-            group_id, typ, last_post = vk.login(domain)
+            group_id, typ, last_post = await asyncio.to_thread(vk.login, domain)
 
             if not du.group_exists(group_id):
                 du.add_group(group_id)
@@ -118,7 +125,7 @@ async def add_del(msg: Message) -> None:
                     if db.get_status(user_id): db.update_countGroup(group_id, -1)
 
                     await msg.answer("Группа успешно удалена из списка уведомлений!")
-        except Exception as err:
+        except Exception:
             logging.info("Нет доступа к страницы:", exc_info=True)
             await msg.answer("<b>Произошла ошибка!</b> Проверьте правильность написания <b>короткого адреса</b> "
                              "страницы, <b>имеете ли вы доступ</b> к этой странице и есть ли на ней <b>хотя бы "
@@ -142,7 +149,7 @@ async def lst(msg: Message) -> None:
         group_ids = [du.get_vk_id(id) for id in user_groups]
 
         vk = VkParser(serviceToken)
-        peoples, groups = vk.info(group_ids)
+        peoples, groups = await asyncio.to_thread(vk.info, group_ids)
 
         text = "<b><i>* Список страниц, от которых вы получаете уведомления!</i></b>\n"
 
@@ -186,10 +193,10 @@ async def like(msg: Message) -> None:
                 [group_id, last_post] = list(map(int, url.split('wall')[-1].split('_')))
 
                 vk = VkParser(token)
-                vk.like(group_id, last_post)
+                await asyncio.to_thread(vk.like, group_id, last_post)
 
                 await msg.answer('Вы поставили лайк 😉')
-            except Exception as err:
+            except Exception:
                 logging.error("Не удалось поставить лайк:", exc_info=True)
                 await msg.answer('По <b>неизвестной причине</b> не удалось поставить лайк!')
         else:
@@ -226,27 +233,16 @@ async def update(msg: Message) -> None:
                 if token: vk = VkParser(token)
                 else: vk = VkParser(serviceToken)
 
-                output = vk.last_post(post=f"{group_id}_{last_post}")
-                text, audio, media = pars_post(types, output)
+                output = await asyncio.to_thread(vk.last_post, post=f"{group_id}_{last_post}")
+                text, audio, media = pars_post(output)
 
-                delete_r = await bot.delete_message(chat_id=user_id, message_id=msg.reply_to_message.message_id)
-                delete = await bot.delete_message(chat_id=user_id, message_id=msg.message_id)
+                await bot.delete_message(chat_id=user_id, message_id=msg.reply_to_message.message_id)
+                await bot.delete_message(chat_id=user_id, message_id=msg.message_id)
 
-                if audio and media:
-                    post_message = await bot.send_media_group(chat_id=user_id, media=media)
-                    await bot.send_media_group(chat_id=user_id, media=audio,
-                                               reply_to_message_id=post_message[0].message_id)
-                elif audio and media == []:
-                    post_message = await bot.send_message(chat_id=user_id, text=text)
-                    await bot.send_media_group(chat_id=user_id, media=audio,
-                                               reply_to_message_id=post_message[0].message_id)
-                elif audio == [] and media:
-                    await bot.send_media_group(chat_id=user_id, media=media)
-                else:
-                    await bot.send_message(chat_id=user_id, text=text, disable_web_page_preview=True)
+                await send_post(bot, user_id, text, audio, media)
 
-            except Exception as err:
-                logging.danger("Ошибка обновления поста:", exc_info=True)
+            except Exception:
+                logging.error("Ошибка обновления поста:", exc_info=True)
                 await msg.answer(text='По неизвестной причине не удалось обновить пост!')
         else: await msg.answer(text='Вы ответили не на тот пост!')
     else: await msg.answer(text='Вы не отметили пост который хотите обновить!')
@@ -265,24 +261,27 @@ async def last_post(msg: Message) -> None:
             if token: vk = VkParser(token)
             else: vk = VkParser(serviceToken)
 
-            output = vk.last_post(domain=domain); vk.login(domain)
-            text, audio, media = pars_post(types, output)
+            output = await asyncio.to_thread(vk.last_post, domain=domain)
+            text, audio, media = pars_post(output)
 
-            if audio and media:
-                post_message = await bot.send_media_group(chat_id=user_id, media=media)
-                await bot.send_media_group(chat_id=user_id, media=audio, reply_to_message_id=post_message[0].message_id)
-            elif audio and media == []:
-                post_message = await bot.send_message(chat_id=user_id, text=text)
-                await bot.send_media_group(chat_id=user_id, media=audio, reply_to_message_id=post_message[0].message_id)
-            elif audio == [] and media:
-                await bot.send_media_group(chat_id=user_id, media=media)
-            else:
-                await bot.send_message(chat_id=user_id, text=text, disable_web_page_preview=True)
+            await send_post(bot, user_id, text, audio, media)
 
-        except Exception as err:
+        except Exception:
             logging.info("Некорректное/недоступное короткое имя:", exc_info=True)
             await msg.answer("Короткое <b>имя страницы неверное</b> или у вас <b>нет доступа</b> к этой странице!")
     else: await msg.answer("Команда введена некорректно! Корректный ввод: /last_post <b>example</b>")
+
+
+@router.message(Command("logout"))
+async def logout(msg: Message) -> None:
+    user_id = login(msg.chat.id, du, db)
+
+    if db.get_token(user_id):
+        db.update_token(user_id, None)
+        await msg.answer("Токен VK удалён, бот снова работает на сервисном ключе. Полностью отозвать доступ "
+                         "можно в настройках VK: <b>Приложения и сайты</b>.")
+    else:
+        await msg.answer("Сохранённого токена нет.")
 
 
 # ПОЛУЧЕНИЕ ТОКЕНА ПОЛЬЗОВАТЕЛЯ
@@ -293,11 +292,14 @@ async def url(msg: Message) -> None:
     if checkUrl in msg.text:
         try:
             token = msg.text.split("&")[0].split("=")[-1]
-            info = VkParser(token).check()
+            await asyncio.to_thread(VkParser(token).check)
 
             db.update_token(user_id, token)
-            await msg.answer("Токен успешно сохранён!")
-        except Exception as err:
+            # ссылка с токеном не должна оставаться в переписке
+            try: await msg.delete()
+            except Exception: pass
+            await msg.answer("Токен успешно сохранён! Удалить его можно командой /logout")
+        except Exception:
             logging.info("Некорректная ссылка:", exc_info=True)
             await msg.answer("Ваша <b>ссылка не корректна</b>, попробуйте повторить копирование!")
     else: await msg.answer("Ваше <b>сообщение не корректно</b>, необходима ссылка, что отобразилась в строке "

@@ -7,6 +7,11 @@ class Users:
         self.connection = sqlite3.connect(database)
         self.cursor = self.connection.cursor()
 
+        # на новой установке (например, в Docker с пустым томом) таблиц ещё нет
+        with self.connection:
+            self.cursor.execute("CREATE TABLE IF NOT EXISTS user (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL)")
+            self.cursor.execute("CREATE TABLE IF NOT EXISTS \"group\" (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL)")
+
     # КОМАНДЫ USER
     def user_exists(self, user_id):
         """Проверяем, есть ли уже пользователь в базе"""
@@ -62,6 +67,12 @@ class Base:
         """Подключаемся к БД и сохраняем курсор соединения"""
         self.connection = sqlite3.connect(database)
         self.cursor = self.connection.cursor()
+
+        with self.connection:
+            self.cursor.execute("CREATE TABLE IF NOT EXISTS user (user_id INTEGER NOT NULL, status BOOLEAN NOT NULL "
+                                "DEFAULT (True), count INTEGER NOT NULL DEFAULT (0), groups TEXT, token TEXT)")
+            self.cursor.execute("CREATE TABLE IF NOT EXISTS \"group\" (group_id INTEGER NOT NULL, type BOOLEAN NOT NULL, "
+                                "count INTEGER NOT NULL DEFAULT (0), last_post INTEGER NOT NULL)")
 
     # КОМАНДЫ USER
     def infoUser_exists(self, user_id):
@@ -166,4 +177,3 @@ class Base:
     def close(self):
         """Закрываем соединение с БД"""
         self.connection.close()
-
