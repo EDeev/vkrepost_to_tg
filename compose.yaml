@@ -1,0 +1,11 @@
+services:
+  bot:
+    build: .
+    image: ghcr.io/edeev/vkrepost_to_tg:latest
+    env_file: .env
+    volumes:
+      - db:/app/db
+    restart: unless-stopped
+
+volumes:
+  db:

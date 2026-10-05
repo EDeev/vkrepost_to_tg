@@ -1,155 +1,87 @@
-# Repost from Vk to Tg 🔄
+# Portal in VK
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
-[![Aiogram](https://img.shields.io/badge/Aiogram-2.x-green.svg)](https://aiogram.dev)
-[![VK API](https://img.shields.io/badge/VK%20API-5.131-orange.svg)](https://dev.vk.com)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+**Русский** · [English](README.en.md)
 
-**Автоматизированная система репостинга контента из VKontakte в Telegram**
+[![CI](https://github.com/EDeev/vkrepost_to_tg/actions/workflows/ci.yml/badge.svg)](https://github.com/EDeev/vkrepost_to_tg/actions/workflows/ci.yml)
+[![Docker](https://github.com/EDeev/vkrepost_to_tg/actions/workflows/docker.yml/badge.svg)](https://github.com/EDeev/vkrepost_to_tg/actions/workflows/docker.yml)
+[![License](https://img.shields.io/github/license/EDeev/vkrepost_to_tg)](LICENSE)
 
-Telegram-бот для автоматического мониторинга и репостинга публикаций из социальной сети ВКонтакте с поддержкой персонализированных подписок и расширенным функционалом взаимодействия.
+Telegram-бот, который пересылает новые посты со страниц и сообществ ВКонтакте в Telegram: подписываешься
+командой `/add <короткое имя>`, и каждый новый пост приходит сообщением — с фото, обложками видео,
+документами, аудио, опросами и репостами.
 
-## 🎯 Основная функциональность
+**Статус:** личный проект, завершён · бот [@vkportalbot](https://t.me/vkportalbot)
 
-### Ключевые возможности
-- **Автоматический мониторинг** публикаций из VK страниц и сообществ
-- **Персонализированные подписки** до 10 источников на пользователя
-- **Интеграция с VK API** через пользовательские токены
-- **Интерактивное взаимодействие** с лайками постов через Telegram
-- **Многоформатная поддержка** медиа-контента (фото, видео, аудио, документы)
+**Стек:** Python 3.12 · aiogram 3 · vk_api · SQLite · Docker
 
-### Архитектурные особенности
-- Асинхронная обработка запросов с использованием `asyncio`
-- Двухуровневая система баз данных (пользователи/группы)
-- Токен-ротация для обхода ограничений API
-- Централизованное управление подписками
+## Возможности
 
-## 🚀 Быстрый старт
+- До 10 подписок на пользователя: личные страницы, группы и паблики
+- Пост переводится в формат Telegram:
+  - фото, обложки видео и картинки-документы — альбомом;
+  - аудио — отдельным сообщением;
+  - опросы, ссылки и документы — в тексте;
+  - упоминания `[id1|Имя]` — ссылками;
+  - у репостов — оба автора и комментарий.
+- Ограничения Telegram учтены: одиночное фото, альбомы до 10 элементов, длинный текст отдельными
+  сообщениями
+- `/last_post` — последний пост любой страницы, `/update` — прислать пост заново с актуальными данными
+- Свой токен VK (необязательно) даёт посты закрытых страниц, на которые вы подписаны, и лайки из Telegram
+  (`/like` ответом на пост)
 
-### Предварительные требования
+> [!IMPORTANT]
+> Если вы присылаете боту свой токен VK, он хранится на сервере бота. Удалить его можно командой
+> `/logout`, полностью отозвать доступ — в настройках VK, раздел «Приложения и сайты».
+
+## Запуск
+
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/EDeev/vkrepost_to_tg.git && cd vkrepost_to_tg
+cp .env.example .env      # BOT_TOKEN и сервисный ключ приложения VK
+docker compose up -d
 ```
 
-### Конфигурация
-1. Создайте Telegram-бота через [@BotFather](https://t.me/botfather)
-2. Получите служебный токен VK API
-3. Настройте файл `config.py`:
+Готовый образ: `docker pull ghcr.io/edeev/vkrepost_to_tg` или `docker pull dcr.deev.su/edeev/vkrepost_to_tg`.
+Базы SQLite создаются при первом запуске.
 
-```python
-# TOKENS
-botToken = 'YOUR_TELEGRAM_BOT_TOKEN'
-serviceToken = "YOUR_VK_SERVICE_TOKEN"
+Без Docker: Python 3.12, `pip install -r requirements.txt`, затем
+`cd code && BOT_TOKEN=… VK_SERVICE_TOKEN=… python bot.py`.
 
-# URL
-loginUrl = "https://oauth.vk.com/authorize?client_id=YOUR_APP_ID&display=page&redirect_uri=https://oauth.vk.com/blank.html&scope=wall,likes&response_type=token&v=5.131"
+## Как устроено
+
+```
+code/bot.py          запуск и фоновый опрос подписок раз в минуту
+code/handlers.py     команды: подписки, последний пост, лайки, токен VK
+code/vk_scripts.py   запросы к VK API и разбор поста
+code/scripts.py      пост → текст в HTML и медиа Telegram, отправка с учётом ограничений
+code/sql.py          пользователи, подписки и последний пост каждой страницы (SQLite)
 ```
 
-### Запуск системы
+Для закрытой страницы бот берёт токен одного из её подписчиков, для открытых — сервисный ключ. Запросы
+к VK идут в отдельном потоке, чтобы бот не замирал. Текст из ВК экранируется.
+
+## Разработка
+
 ```bash
-python bot.py
+pip install -r requirements-dev.txt
+ruff check --select E9,F code tests && pytest
 ```
 
-## 📋 Структура команд
+Тесты проверяют разбор постов (экранирование, упоминания, ссылки, репосты, лимит альбома) и отправку
+(одиночное фото, длинный текст, аудио). Docker-образ собирается по тегу `v*` и публикуется в GitHub
+Packages и `dcr.deev.su`.
 
-| Команда | Описание | Синтаксис |
-|---------|----------|-----------|
-| `/start` | Инициализация пользователя | `/start` |
-| `/add` | Добавление подписки | `/add domain_name` |
-| `/del` | Удаление подписки | `/del domain_name` |
-| `/list` | Просмотр активных подписок | `/list` |
-| `/like` | Лайк поста (ответ на сообщение) | `/like` |
-| `/notif` | Переключение уведомлений | `/notif` |
-| `/last_post` | Получение последней публикации | `/last_post domain_name` |
+## Лицензия
 
-## 🏗️ Архитектура системы
+MIT — см. [LICENSE](LICENSE).
 
-### Компоненты системы
-```
-├── bot.py              # Основной модуль бота
-├── vk_scripts.py       # VK API интеграция
-├── sql.py              # Управление базами данных
-├── scripts.py          # Вспомогательные функции
-├── config.py           # Конфигурация проекта
-└── db/
-    ├── users.db        # База пользователей
-    └── base.db         # Основная база данных
-```
+## Автор
 
-### Технологический стек
-- **Backend**: Python 3.8+
-- **Telegram Framework**: Aiogram 2.x
-- **VK Integration**: vk_api
-- **Database**: SQLite
-- **Async Processing**: asyncio
-- **Media Processing**: Built-in handlers
-
-### Схема базы данных
-
-#### Таблица `user` (users.db)
-```sql
-user_id INTEGER PRIMARY KEY  -- Telegram ID пользователя
-id INTEGER AUTOINCREMENT     -- Внутренний ID
-```
-
-#### Таблица `user` (base.db)
-```sql
-user_id INTEGER              -- Ссылка на users.db
-status BOOLEAN               -- Статус уведомлений
-groups TEXT                  -- Список подписок (разделитель ;)
-token TEXT                   -- VK access token
-count INTEGER                -- Количество подписок
-```
-
-## ⚡ Алгоритм работы
-
-### Цикл мониторинга
-1. **Сканирование источников** (интервал: 60 секунд)
-2. **Проверка новых публикаций** через VK API
-3. **Форматирование контента** под Telegram
-4. **Массовая рассылка** подписчикам
-5. **Обновление метаданных** в базе данных
-
-### Обработка медиа-контента
-- **Фотографии**: Группировка в медиа-альбомы
-- **Видео**: Информационные заглушки с ссылками
-- **Аудио**: Отдельные медиа-сообщения
-- **Документы**: Прямые ссылки с метаданными
-- **Опросы**: Текстовое представление с результатами
-
-## 🔧 Расширенные возможности
-
-### Система токенов
-- **Служебный токен**: Базовый доступ к публичному контенту
-- **Пользовательские токены**: Доступ к закрытым страницам и функции лайков
-- **Автоматическая ротация**: Распределение нагрузки между токенами
-
-### Обработка ошибок
-- Graceful handling VK API лимитов
-- Автоматический фallback на служебный токен
-- Логирование критических ошибок
-
-## 📊 Метрики производительности
-
-- **Пропускная способность**: До 1000 пользователей
-- **Частота обновлений**: 60 секунд
-- **Лимит подписок**: 10 на пользователя
-- **Поддерживаемые форматы**: 6 типов медиа
-
-## 📄 Лицензия
-
-Проект распространяется под лицензией MIT.
-
-## 👨‍💻 Автор
-
-**Деев Егор Викторович**
-- GitHub: [@EDeev](https://github.com/EDeev)
-- Email: egor@deev.space
-- Telegram: [@Egor_Deev](https://t.me/Egor_Deev)
+**Деев Егор Викторович** — [GitHub](https://github.com/EDeev) · [Telegram](https://t.me/DeevEgor) · [egor@deev.space](mailto:egor@deev.space)
 
 ---
 
 <div align="center">
-  <sub>Проект носит некоммерческий характер и предназначен для образовательных целей и личного использования.</sub>
-  <p><sub>Создано с ❤️ от вашего дорогого - deev.space ©</sub></p>
+  <sub>⭐ Если проект оказался полезным, поставьте звёздочку на GitHub!</sub>
+  <p><sub>Сделано с ❤️ — <a href="https://deev.space">deev.space</a></sub></p>
 </div>
