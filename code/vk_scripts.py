@@ -38,39 +38,72 @@ class VkParser:
 
         return peoples, groups
 
-    def last_post(self, owner_id=None, domain=None):
-        wall = self.vk.wall.get(owner_id=owner_id, domain=domain, count=2, extended=1)
+    def last_post(self, owner_id=None, domain=None, post=None):
+        if post: wall = self.vk.wall.getById(posts=post, extended=1)
+        else: wall = self.vk.wall.get(owner_id=owner_id, domain=domain, count=2, extended=1)
+
         post = max([[int(pt["id"]), pt] for pt in wall["items"]])
+        owner_id = post[1]['owner_id']
 
-        [post_id, post] = post
-        owner_id, output = post['owner_id'], []
+        if owner_id > 0:
+            [name, domain] = [[per['first_name'] + ' ' + per['last_name'], per['screen_name']] for per in wall["profiles"] if per["id"] == owner_id][0]
+        else:
+            [name, domain] = [[gro['name'], gro['screen_name']] for gro in wall["groups"] if gro["id"] == int(str(owner_id)[1:])][0]
 
-        if owner_id > 0: [name, domain] = [[per['first_name'] + ' ' + per['last_name'], per['screen_name']]
-                                           for per in wall["profiles"] if per["id"] == owner_id][0]
-        else: [name, domain] = [[gro['name'], gro['screen_name']]
-                                for gro in wall["groups"] if gro["id"] == int(str(owner_id)[1:])][0]
+        if 'copy_history' in post[1]:
+            comment, orig_id = post[1]['text'], post[0]
 
-        attachments = post['attachments']
-        types = [[typ['type'], typ] for typ in attachments]
+            post = [post[1]['copy_history'][0]['id'], post[1]['copy_history'][0]]
+            owner_id_r = post[1]['owner_id']
 
-        for typ in types:
-            if typ[0] == 'photo':
-                output.append([typ[0], typ[1]['photo']['sizes'][-1]['url']])
-            elif typ[0] == 'video':
-                output.append([typ[0], typ[1]['video']['title']])
-            elif typ[0] == "doc":
-                output.append([typ[0], [typ[1]['doc']['title'], typ[1]['doc']['url'],
-                                        typ[1]['doc']['type'], typ[1]['doc']['size']]])
-            elif typ[0] == "audio":
-                output.append([typ[0], [typ[1]['audio']['title'], typ[1]['audio']['url'], typ[1]['audio']['artist']]])
-            elif typ[0] == "poll":
-                answer = [[que['text'], que['votes']] for que in typ[1]['poll']['answers']]
-                output.append([typ[0], [typ[1]['poll']['question'], typ[1]['poll']['votes'],
-                                        typ[1]['poll']['disable_unvote'], typ[1]['poll']['anonymous'], answer]])
-            elif typ[0] == "link":
-                output.append([typ[0], [typ[1]['link']['title'], typ[1]['link']['url']]])
+            if owner_id_r > 0:
+                [name_r, domain_r] = [[per['first_name'] + ' ' + per['last_name'], per['screen_name']] for per in wall["profiles"] if per["id"] == owner_id_r][0]
+            else:
+                [name_r, domain_r] = [[gro['name'], gro['screen_name']] for gro in wall["groups"] if gro["id"] == int(str(owner_id_r)[1:])][0]
 
-        return [output, post['text'],
-                f"*Автор поста -* [{name}](https://vk.com/{domain}?w=wall{owner_id}_{post_id})", post_id]
+            return get_output(post, name_r, domain_r, [orig_id, owner_id, name, domain, comment])
+        else:
+            return get_output(post, name, domain)
 
 
+def get_output(post, name, domain, repost=None):
+    [post_id, post] = post
+    owner_id, output = post['owner_id'], []
+
+    attachments = post['attachments']
+    types = [[typ['type'], typ] for typ in attachments]
+
+    for typ in types:
+        if typ[0] == 'photo':
+            output.append([typ[0], typ[1]['photo']['sizes'][-1]['url']])
+        elif typ[0] == 'video':
+            video = typ[1]['video']
+            if 'photo_1280' in video:
+                frame = video['photo_1280']
+            else:
+                frame = video['photo_800']
+
+            output.append([typ[0], [video['title'], video['duration'], video['views'], frame]])
+        elif typ[0] == "doc":
+            output.append([typ[0], [typ[1]['doc']['title'], typ[1]['doc']['url'],
+                                    typ[1]['doc']['type'], typ[1]['doc']['size']]])
+        elif typ[0] == "audio":
+            output.append([typ[0], [typ[1]['audio']['title'], typ[1]['audio']['url'], typ[1]['audio']['artist']]])
+        elif typ[0] == "poll":
+            answer = [[que['text'], que['votes']] for que in typ[1]['poll']['answers']]
+            output.append([typ[0], [typ[1]['poll']['question'], typ[1]['poll']['votes'],
+                                    typ[1]['poll']['disable_unvote'], typ[1]['poll']['anonymous'], answer]])
+        elif typ[0] == "link":
+            output.append([typ[0], [typ[1]['link']['title'], typ[1]['link']['url']]])
+
+    if repost:
+        [author_id, author_owner_id, author_name, author_domain, author_comment] = repost
+
+        comment = f"<b>Автор репоста -</b> <a href='https://vk.com/{author_domain}?w=wall{author_owner_id}_{author_id}'>{author_name}</a>"
+        if author_comment != "": comment += f"\n<blockquote>{author_comment}</blockquote>\n"
+        comment += f"\n<b>Автор поста -</b> <a href='https://vk.com/{domain}?w=wall{owner_id}_{post_id}'>{name}</a>"
+
+        return [output, f"{post['text']}", comment, author_id]
+    else:
+        return [output, f"{post['text']}",
+                f"<b>Автор поста -</b> <a href='https://vk.com/{domain}?w=wall{owner_id}_{post_id}'>{name}</a>", post_id]
