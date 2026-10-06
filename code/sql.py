@@ -1,179 +1,150 @@
-import sqlite3
+"""Хранилище бота — PostgreSQL (до 2026-10 — два файла SQLite users.db и base.db).
+
+users и pages хранят короткие внутренние номера пользователей Telegram и страниц ВК; subscribers и
+page_state ссылаются на эти номера, как раньше таблицы user и group в base.db (в PostgreSQL имена
+user и group зарезервированы)."""
+from psycopg_pool import ConnectionPool
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id    SERIAL PRIMARY KEY,
+    tg_id BIGINT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS pages (
+    id    SERIAL PRIMARY KEY,
+    vk_id BIGINT NOT NULL UNIQUE               -- у сообществ отрицательный
+);
+CREATE TABLE IF NOT EXISTS subscribers (
+    user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    status  BOOLEAN NOT NULL DEFAULT TRUE,     -- получает ли посты
+    count   INTEGER NOT NULL DEFAULT 0,        -- число подписок
+    groups  TEXT,                              -- номера страниц через «;»
+    token   TEXT                               -- токен VK пользователя (необязательный)
+);
+CREATE TABLE IF NOT EXISTS page_state (
+    page_id   INTEGER PRIMARY KEY REFERENCES pages (id) ON DELETE CASCADE,
+    type      BOOLEAN NOT NULL,                -- TRUE — сообщество, FALSE — личная страница
+    count     INTEGER NOT NULL DEFAULT 0,      -- сколько подписчиков ждут посты
+    last_post BIGINT NOT NULL
+);
+"""
 
 
-class Users:
-    def __init__(self, database):
-        """Подключаемся к БД и сохраняем курсор соединения"""
-        self.connection = sqlite3.connect(database)
-        self.cursor = self.connection.cursor()
+def connect(dsn):
+    """Пул соединений сам переподключается, если PostgreSQL перезапускали"""
+    pool = ConnectionPool(dsn, min_size=1, max_size=4, kwargs={"autocommit": True}, open=True)
+    with pool.connection() as conn:
+        conn.execute(SCHEMA)
+    return pool
 
-        # на новой установке (например, в Docker с пустым томом) таблиц ещё нет
-        with self.connection:
-            self.cursor.execute("CREATE TABLE IF NOT EXISTS user (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL)")
-            self.cursor.execute("CREATE TABLE IF NOT EXISTS \"group\" (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL)")
 
-    # КОМАНДЫ USER
+class _Base:
+    def __init__(self, pool):
+        self.pool = pool
+
+    def _one(self, query, args=()):
+        with self.pool.connection() as conn:
+            row = conn.execute(query, args).fetchone()
+            return row[0] if row else None
+
+    def _all(self, query, args=()):
+        with self.pool.connection() as conn:
+            return conn.execute(query, args).fetchall()
+
+    def _run(self, query, args=()):
+        with self.pool.connection() as conn:
+            conn.execute(query, args)
+
+
+class Users(_Base):
+    # ПОЛЬЗОВАТЕЛИ TELEGRAM
     def user_exists(self, user_id):
-        """Проверяем, есть ли уже пользователь в базе"""
-        with self.connection:
-            result = self.cursor.execute('SELECT * FROM `user` WHERE `user_id` = ?', (user_id,)).fetchall()
-            return bool(len(result))
+        return bool(self._one("SELECT 1 FROM users WHERE tg_id = %s", (user_id,)))
 
     def add_user(self, user_id):
-        """Добавляем нового пользователя"""
-        with self.connection:
-            return self.cursor.execute("INSERT INTO `user` (`user_id`) VALUES(?)", (user_id,))
+        self._run("INSERT INTO users (tg_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
 
     def get_user_id(self, user_id):
-        """Получаем короткое айди юзера"""
-        with self.connection:
-            return self.cursor.execute('SELECT `id` FROM `user` WHERE `user_id` = ?', (user_id,)).fetchone()[0]
+        """Внутренний номер по id Telegram"""
+        return self._one("SELECT id FROM users WHERE tg_id = %s", (user_id,))
 
     def get_tg_id(self, user_id):
-        """Получаем длинное айди юзера"""
-        with self.connection:
-            return self.cursor.execute('SELECT `user_id` FROM `user` WHERE `id` = ?', (user_id,)).fetchone()[0]
+        """id Telegram по внутреннему номеру"""
+        return self._one("SELECT tg_id FROM users WHERE id = %s", (user_id,))
 
-    # КОМАНДЫ GROUP
+    # СТРАНИЦЫ ВК
     def group_exists(self, group_id):
-        """Проверяем, есть ли уже группа в базе"""
-        with self.connection:
-            result = self.cursor.execute('SELECT * FROM `group` WHERE `group_id` = ?', (group_id,)).fetchall()
-            return bool(len(result))
+        return bool(self._one("SELECT 1 FROM pages WHERE vk_id = %s", (group_id,)))
 
     def add_group(self, group_id):
-        """Добавляем новую группу"""
-        with self.connection:
-            return self.cursor.execute("INSERT INTO `group` (`group_id`) VALUES(?)", (group_id,))
+        self._run("INSERT INTO pages (vk_id) VALUES (%s) ON CONFLICT DO NOTHING", (group_id,))
 
     def get_group_id(self, group_id):
-        """Получаем короткое айди группы"""
-        with self.connection:
-            return self.cursor.execute('SELECT `id` FROM `group` WHERE `group_id` = ?', (group_id,)).fetchone()[0]
+        """Внутренний номер страницы по id ВК"""
+        return self._one("SELECT id FROM pages WHERE vk_id = %s", (group_id,))
 
     def get_vk_id(self, group_id):
-        """Получаем длинное айди группы"""
-        with self.connection:
-            return self.cursor.execute('SELECT `group_id` FROM `group` WHERE `id` = ?', (group_id,)).fetchone()[0]
-
-    # ЗАКРЫТИЕ ВЫЗОВА
-    def close(self):
-        """Закрываем соединение с БД"""
-        self.connection.close()
+        """id ВК по внутреннему номеру"""
+        return self._one("SELECT vk_id FROM pages WHERE id = %s", (group_id,))
 
 
-class Base:
-    def __init__(self, database):
-        """Подключаемся к БД и сохраняем курсор соединения"""
-        self.connection = sqlite3.connect(database)
-        self.cursor = self.connection.cursor()
-
-        with self.connection:
-            self.cursor.execute("CREATE TABLE IF NOT EXISTS user (user_id INTEGER NOT NULL, status BOOLEAN NOT NULL "
-                                "DEFAULT (True), count INTEGER NOT NULL DEFAULT (0), groups TEXT, token TEXT)")
-            self.cursor.execute("CREATE TABLE IF NOT EXISTS \"group\" (group_id INTEGER NOT NULL, type BOOLEAN NOT NULL, "
-                                "count INTEGER NOT NULL DEFAULT (0), last_post INTEGER NOT NULL)")
-
-    # КОМАНДЫ USER
+class Base(_Base):
+    # ПОДПИСЧИКИ
     def infoUser_exists(self, user_id):
-        """Проверяем, есть ли данные уже в базе"""
-        with self.connection:
-            result = self.cursor.execute('SELECT * FROM `user` WHERE `user_id` = ?', (user_id,)).fetchall()
-            return bool(len(result))
+        return bool(self._one("SELECT 1 FROM subscribers WHERE user_id = %s", (user_id,)))
 
     def add_infoUser(self, user_id):
-        """Добавляем информацию о пользователе"""
-        with self.connection:
-            return self.cursor.execute("INSERT INTO `user` (`user_id`) VALUES(?)", (user_id, ))
+        self._run("INSERT INTO subscribers (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
 
     def all_activUser(self):
-        """Список активных пользователей"""
-        with self.connection:
-            return self.cursor.execute('SELECT `user_id`, `groups` FROM `user` WHERE `status` = 1 AND `count` > 0 '
-                                       'AND `token` NOT NULL').fetchall()
+        """Подписчики со своим токеном VK, которые получают посты"""
+        return self._all("SELECT user_id, groups FROM subscribers WHERE status AND count > 0 AND token IS NOT NULL")
 
     def all_subUser(self):
-        """Список пользователей подписанных на группу"""
-        with self.connection:
-            return self.cursor.execute('SELECT `user_id`, `groups` FROM `user` WHERE `status` = 1 AND `count` > 0').fetchall()
+        """Все подписчики, которые получают посты"""
+        return self._all("SELECT user_id, groups FROM subscribers WHERE status AND count > 0")
 
     def get_status(self, user_id):
-        """Получаем статус рассылки уведомлений"""
-        with self.connection:
-            return self.cursor.execute('SELECT `status` FROM `user` WHERE `user_id` = ?', (user_id,)).fetchone()[0]
+        return self._one("SELECT status FROM subscribers WHERE user_id = %s", (user_id,))
 
     def update_status(self, user_id):
-        """Обновляем статус рассылки уведомлений"""
-        with self.connection:
-            status = self.cursor.execute('SELECT `status` FROM `user` WHERE `user_id` = ?', (user_id,)).fetchone()[0]
-            return self.cursor.execute("UPDATE `user` SET `status` = ? WHERE `user_id` = ?", (not status, user_id))
+        self._run("UPDATE subscribers SET status = NOT status WHERE user_id = %s", (user_id,))
 
     def get_user_groups(self, user_id):
-        """Получаем группы на которые подписан пользователь"""
-        with self.connection:
-            return self.cursor.execute('SELECT `groups` FROM `user` WHERE `user_id` = ?', (user_id,)).fetchone()[0]
+        return self._one("SELECT groups FROM subscribers WHERE user_id = %s", (user_id,))
 
     def update_user_groups(self, user_id, groups):
-        """Обновляем группы на которые подписан пользователь"""
-        with self.connection:
-            return self.cursor.execute("UPDATE `user` SET `groups` = ? WHERE `user_id` = ?", (groups, user_id))
+        self._run("UPDATE subscribers SET groups = %s WHERE user_id = %s", (groups, user_id))
 
     def get_token(self, user_id):
-        """Получаем access token пользователя"""
-        with self.connection:
-            return self.cursor.execute('SELECT `token` FROM `user` WHERE `user_id` = ?', (user_id,)).fetchone()[0]
+        return self._one("SELECT token FROM subscribers WHERE user_id = %s", (user_id,))
 
     def update_token(self, user_id, token):
-        """Обновляем access token пользователя"""
-        with self.connection:
-            return self.cursor.execute("UPDATE `user` SET `token` = ? WHERE `user_id` = ?", (token, user_id))
+        self._run("UPDATE subscribers SET token = %s WHERE user_id = %s", (token, user_id))
 
     def get_countUser(self, user_id):
-        """Получаем количество подписок пользователя"""
-        with self.connection:
-            return self.cursor.execute('SELECT `count` FROM `user` WHERE `user_id` = ?', (user_id,)).fetchone()[0]
+        return self._one("SELECT count FROM subscribers WHERE user_id = %s", (user_id,))
 
     def update_countUser(self, user_id, num):
-        """Обновляем количество подписок пользователя"""
-        with self.connection:
-            count = self.cursor.execute('SELECT `count` FROM `user` WHERE `user_id` = ?', (user_id,)).fetchone()[0]
-            return self.cursor.execute("UPDATE `user` SET `count` = ? WHERE `user_id` = ?", (count + num, user_id))
+        self._run("UPDATE subscribers SET count = count + %s WHERE user_id = %s", (num, user_id))
 
-    # КОМАНДЫ GROUP
+    # СТРАНИЦЫ
     def infoGroup_exists(self, group_id):
-        """Проверяем, есть ли данные уже в базе"""
-        with self.connection:
-            result = self.cursor.execute('SELECT * FROM `group` WHERE `group_id` = ?', (group_id,)).fetchall()
-            return bool(len(result))
+        return bool(self._one("SELECT 1 FROM page_state WHERE page_id = %s", (group_id,)))
 
     def add_infoGroup(self, group_id, tp, last_post):
-        """Добавляем информацию о группе"""
-        with self.connection:
-            return self.cursor.execute("INSERT INTO `group` (`group_id`, `type`, `last_post`) VALUES(?, ?, ?)",
-                                       (group_id, tp, last_post))
+        self._run("INSERT INTO page_state (page_id, type, last_post) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                  (group_id, bool(tp), last_post))
 
     def all_notifGroup(self):
-        """Список отслеживаемых групп"""
-        with self.connection:
-            return self.cursor.execute('SELECT `group_id` FROM `group` WHERE `count` > 0').fetchall()
+        """Страницы, на которые кто-то подписан"""
+        return self._all("SELECT page_id FROM page_state WHERE count > 0")
 
     def get_postGroup(self, group_id):
-        """Получаем номер последнего поста"""
-        with self.connection:
-            return self.cursor.execute('SELECT `last_post` FROM `group` WHERE `group_id` = ?', (group_id,)).fetchone()[0]
+        return self._one("SELECT last_post FROM page_state WHERE page_id = %s", (group_id,))
 
     def update_postGroup(self, group_id, last_post):
-        """Обновляем номер последнего поста"""
-        with self.connection:
-            return self.cursor.execute("UPDATE `group` SET `last_post` = ? WHERE `group_id` = ?", (last_post, group_id))
+        self._run("UPDATE page_state SET last_post = %s WHERE page_id = %s", (last_post, group_id))
 
     def update_countGroup(self, group_id, num):
-        """Обновляем количество подписок на группу"""
-        with self.connection:
-            count = self.cursor.execute('SELECT `count` FROM `group` WHERE `group_id` = ?', (group_id,)).fetchone()[0]
-            return self.cursor.execute("UPDATE `group` SET `count` = ? WHERE `group_id` = ?", (count + num, group_id))
-
-    # ЗАКРЫТИЕ ВЫЗОВА
-    def close(self):
-        """Закрываем соединение с БД"""
-        self.connection.close()
+        self._run("UPDATE page_state SET count = count + %s WHERE page_id = %s", (num, group_id))

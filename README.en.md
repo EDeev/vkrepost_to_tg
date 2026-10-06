@@ -12,7 +12,7 @@ audio, polls and reposts. The bot speaks Russian.
 
 **Status:** personal project, completed · bot [@vkportalbot](https://t.me/vkportalbot)
 
-**Stack:** Python 3.12 · aiogram 3 · vk_api · SQLite · Docker
+**Stack:** Python 3.12 · aiogram 3 · vk_api · PostgreSQL · Docker
 
 ## Features
 
@@ -41,10 +41,11 @@ docker compose up -d
 ```
 
 Prebuilt image: `docker pull ghcr.io/edeev/vkrepost_to_tg` or `docker pull dcr.deev.su/edeev/vkrepost_to_tg`.
-The SQLite databases are created on first start.
+PostgreSQL tables are created on first start. Data from the old version (SQLite `users.db` and `base.db`)
+is moved by `python scripts/migrate_sqlite.py --sqlite-dir path/to/db --dsn postgresql://…`.
 
 Without Docker: Python 3.12, `pip install -r requirements.txt`, then
-`cd code && BOT_TOKEN=… VK_SERVICE_TOKEN=… python bot.py`.
+`cd code && BOT_TOKEN=… VK_SERVICE_TOKEN=… DATABASE_URL=postgresql://… python bot.py` (needs PostgreSQL).
 
 ## How it works
 
@@ -53,7 +54,8 @@ code/bot.py          entry point and background polling of subscriptions every m
 code/handlers.py     commands: subscriptions, latest post, likes, VK token
 code/vk_scripts.py   VK API requests and post parsing
 code/scripts.py      post → HTML text and Telegram media, sending within Telegram limits
-code/sql.py          users, subscriptions and each page's latest post (SQLite)
+code/sql.py          users, subscriptions and each page's latest post (PostgreSQL)
+scripts/             migration from SQLite
 ```
 
 For a closed page the bot uses the token of one of its subscribers; for open pages, the service key. VK

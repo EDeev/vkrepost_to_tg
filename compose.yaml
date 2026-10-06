@@ -3,9 +3,26 @@ services:
     build: .
     image: ghcr.io/edeev/vkrepost_to_tg:latest
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql://vkport:vkport@db:5432/vkport
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vkport
+      POSTGRES_PASSWORD: vkport
+      POSTGRES_DB: vkport
     volumes:
-      - db:/app/db
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vkport"]
+      interval: 5s
+      retries: 10
     restart: unless-stopped
 
 volumes:
-  db:
+  pgdata:

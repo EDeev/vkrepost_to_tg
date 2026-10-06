@@ -12,7 +12,7 @@ Telegram-бот, который пересылает новые посты со 
 
 **Статус:** личный проект, завершён · бот [@vkportalbot](https://t.me/vkportalbot)
 
-**Стек:** Python 3.12 · aiogram 3 · vk_api · SQLite · Docker
+**Стек:** Python 3.12 · aiogram 3 · vk_api · PostgreSQL · Docker
 
 ## Возможности
 
@@ -42,10 +42,11 @@ docker compose up -d
 ```
 
 Готовый образ: `docker pull ghcr.io/edeev/vkrepost_to_tg` или `docker pull dcr.deev.su/edeev/vkrepost_to_tg`.
-Базы SQLite создаются при первом запуске.
+Таблицы в PostgreSQL создаются при первом запуске. Данные старой версии (SQLite `users.db` и `base.db`)
+переносит `python scripts/migrate_sqlite.py --sqlite-dir путь/к/db --dsn postgresql://…`.
 
 Без Docker: Python 3.12, `pip install -r requirements.txt`, затем
-`cd code && BOT_TOKEN=… VK_SERVICE_TOKEN=… python bot.py`.
+`cd code && BOT_TOKEN=… VK_SERVICE_TOKEN=… DATABASE_URL=postgresql://… python bot.py` (нужен PostgreSQL).
 
 ## Как устроено
 
@@ -54,7 +55,8 @@ code/bot.py          запуск и фоновый опрос подписок 
 code/handlers.py     команды: подписки, последний пост, лайки, токен VK
 code/vk_scripts.py   запросы к VK API и разбор поста
 code/scripts.py      пост → текст в HTML и медиа Telegram, отправка с учётом ограничений
-code/sql.py          пользователи, подписки и последний пост каждой страницы (SQLite)
+code/sql.py          пользователи, подписки и последний пост каждой страницы (PostgreSQL)
+scripts/             перенос данных из SQLite
 ```
 
 Для закрытой страницы бот берёт токен одного из её подписчиков, для открытых — сервисный ключ. Запросы

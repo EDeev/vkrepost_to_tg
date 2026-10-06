@@ -7,14 +7,14 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.bot import DefaultBotProperties
 
 from config import botToken
-from sql import Users, Base
+from sql import Users, Base, connect
 
 bot = Bot(token=botToken, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 
-os.makedirs("../db", exist_ok=True)
-du = Users('../db/users.db')
-db = Base('../db/base.db')
+pool = connect(os.getenv("DATABASE_URL", "postgresql://vkport:vkport@localhost:5432/vkport"))
+du = Users(pool)
+db = Base(pool)
 
 # лог в файл, если задан LOG_FILE (так бот работал на сервере), иначе — в консоль
 logging.basicConfig(level=logging.INFO, filename=os.getenv("LOG_FILE") or None,
