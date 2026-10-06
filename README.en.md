@@ -40,7 +40,7 @@ cp .env.example .env      # BOT_TOKEN and the VK app service key
 docker compose up -d
 ```
 
-Prebuilt image: `docker pull ghcr.io/edeev/vkrepost_to_tg` or `docker pull dcr.deev.su/edeev/vkrepost_to_tg`.
+Prebuilt image: `docker pull ghcr.io/edeev/vkrepost_to_tg` or `docker pull git.deev.su/edeev/vkrepost_to_tg`.
 PostgreSQL tables are created on first start. Data from the old version (SQLite `users.db` and `base.db`)
 is moved by `python scripts/migrate_sqlite.py --sqlite-dir path/to/db --dsn postgresql://…`.
 
@@ -70,7 +70,7 @@ ruff check --select E9,F code tests && pytest
 
 The tests cover post parsing (escaping, mentions, links, reposts, album limit) and sending (single photo,
 long text, audio). The Docker image is built on `v*` tags and published to GitHub Packages and
-`dcr.deev.su`.
+`git.deev.su`.
 
 ## License
 

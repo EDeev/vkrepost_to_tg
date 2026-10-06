@@ -41,7 +41,7 @@ cp .env.example .env      # BOT_TOKEN и сервисный ключ прило�
 docker compose up -d
 ```
 
-Готовый образ: `docker pull ghcr.io/edeev/vkrepost_to_tg` или `docker pull dcr.deev.su/edeev/vkrepost_to_tg`.
+Готовый образ: `docker pull ghcr.io/edeev/vkrepost_to_tg` или `docker pull git.deev.su/edeev/vkrepost_to_tg`.
 Таблицы в PostgreSQL создаются при первом запуске. Данные старой версии (SQLite `users.db` и `base.db`)
 переносит `python scripts/migrate_sqlite.py --sqlite-dir путь/к/db --dsn postgresql://…`.
 
@@ -71,7 +71,7 @@ ruff check --select E9,F code tests && pytest
 
 Тесты проверяют разбор постов (экранирование, упоминания, ссылки, репосты, лимит альбома) и отправку
 (одиночное фото, длинный текст, аудио). Docker-образ собирается по тегу `v*` и публикуется в GitHub
-Packages и `dcr.deev.su`.
+Packages и `git.deev.su`.
 
 ## Лицензия
 
